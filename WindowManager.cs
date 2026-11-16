@@ -797,7 +797,10 @@ public class WindowManager : DrawableGameComponent
                             PropagateInputEvent(static (c, ie) => c.OnMiddleClick(ie), MouseInputFlags.MiddleMouseButton, args);
                     }
 
-                    if (Cursor.ScrollWheelValue != 0 && !isInputCaptured)
+                    bool isMouseWheelBlocked = (Cursor.ScrollWheelValue != 0 ||
+                        Cursor.HorizontalScrollWheelValue != 0) && !CanDispatchMouseWheel();
+
+                    if (Cursor.ScrollWheelValue != 0 && !isInputCaptured && !isMouseWheelBlocked)
                     {
                         var scrollArgs = new InputEventArgs();
                         PropagateInputEventTunneling(static (c, ie) => c.OnPreviewMouseScrolled(ie), MouseInputFlags.ScrollWheel, scrollArgs);
@@ -805,7 +808,7 @@ public class WindowManager : DrawableGameComponent
                             PropagateInputEvent(static (c, ie) => c.OnMouseScrolled(ie), MouseInputFlags.ScrollWheel, scrollArgs);
                     }
 
-                    if (Cursor.HorizontalScrollWheelValue != 0 && !isInputCaptured)
+                    if (Cursor.HorizontalScrollWheelValue != 0 && !isInputCaptured && !isMouseWheelBlocked)
                     {
                         var scrollArgs = new InputEventArgs();
                         PropagateInputEventTunneling(static (c, ie) => c.OnPreviewMouseScrolledHorizontally(ie), MouseInputFlags.ScrollWheelHorizontal, scrollArgs);
@@ -851,6 +854,33 @@ public class WindowManager : DrawableGameComponent
 
             control = control.Parent;
         }
+    }
+
+    /// <summary>
+    /// Determines whether mouse wheel input may be dispatched to the control under
+    /// the cursor. While any drop-down list is open, the wheel is reserved for it:
+    /// only controls inside the open drop-down receive scroll events, so other
+    /// scrollable lists on the page do not scroll behind the open drop-down.
+    /// </summary>
+    private bool CanDispatchMouseWheel()
+    {
+        var control = ActiveControl;
+
+        while (control != null)
+        {
+            if (control is XNADropDown dropDown && dropDown.DropDownState != DropDownState.CLOSED)
+                return true;
+
+            control = control.Parent;
+        }
+
+        for (int i = 0; i < Controls.Count; i++)
+        {
+            if (Controls[i] is XNADropDown openDropDown && openDropDown.DropDownState != DropDownState.CLOSED)
+                return false;
+        }
+
+        return true;
     }
 
     private void PropagateInputEventTunneling(Action<XNAControl, InputEventArgs> action, MouseInputFlags mouseInputFlags, InputEventArgs inputEventArgs)
