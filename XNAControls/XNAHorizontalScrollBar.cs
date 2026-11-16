@@ -3,21 +3,18 @@ using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
-using Rampastring.XNAUI;
-using Rampastring.XNAUI.XNAControls;
-
 namespace Rampastring.XNAUI.XNAControls;
 
 /// <summary>
 /// A horizontal scroll bar that can be utilized for various other controls.
 /// </summary>
-/// /// <remarks>
+/// <remarks>
 /// See also the sibling <see cref="XNAScrollBar"/> class.
+/// Inherits scroll state and math from <see cref="XNAScrollBarBase"/>;
+/// the scroll axis runs along <see cref="XNAControl.Width"/>.
 /// </remarks>
-public class XNAHorizontalScrollBar : XNAControl
+public class XNAHorizontalScrollBar : XNAScrollBarBase
 {
-    private const int MIN_BUTTON_WIDTH = 10;
-
     /// <summary>
     /// Creates a new scroll bar.
     /// </summary>
@@ -46,6 +43,13 @@ public class XNAHorizontalScrollBar : XNAControl
         if (AssetLoader.AssetExists("hsbRightArrowHovered.png"))
             btnScrollRight.HoverTexture = AssetLoader.LoadTexture("hsbRightArrowHovered.png");
 
+        // The arrow buttons cap the track, so their widths serve as the
+        // header/footer sizes of the base class.
+        HeaderHeight = btnScrollLeft.Width;
+        FooterHeight = btnScrollRight.Width;
+
+        ScrolledToBottom += (s, e) => ScrolledToRight?.Invoke(this, EventArgs.Empty);
+
         ClientRectangleUpdated += XNAScrollBar_ClientRectangleUpdated;
     }
 
@@ -57,56 +61,26 @@ public class XNAHorizontalScrollBar : XNAControl
     }
 
     /// <summary>
-    /// Raised when the scroll bar is scrolled. 
-    /// </summary>
-    public event EventHandler Scrolled;
-
-    /// <summary>
     /// Raised when the scroll bar is scrolled and it reaches its rightmost value.
     /// </summary>
     public event EventHandler ScrolledToRight;
 
     /// <summary>
-    /// The height of the entire scrollable area.
-    /// For example in a list box, the sum of the height of its items.
-    /// </summary>
-    public int Length { get; set; }
-
-    /// <summary>
-    /// The number of pixels that the scrollable parent control
-    /// is able to display at once.
-    /// </summary>
-    public int DisplayedPixelCount { get; set; }
-
-    /// <summary>
-    /// The scroll bar's current position.
-    /// The parent of the scroll-bar has to keep the scrollbar up-to-date when the 
+    /// The scroll bar's current position, measured from the left edge of the content.
+    /// Alias of <see cref="XNAScrollBarBase.ViewTop"/> for horizontal use.
+    /// The parent of the scroll-bar has to keep the scrollbar up-to-date when the
     /// view of the parent changes.
     /// </summary>
-    public int ViewLeft { get; set; }
-
-    /// <summary>
-    /// How many pixels to scroll at once.
-    /// </summary>
-    public int ScrollStep { get; set; } = 10;
+    public int ViewLeft
+    {
+        get => ViewTop;
+        set => ViewTop = value;
+    }
 
     /// <summary>
     /// Returns the height of the scroll bar.
     /// </summary>
-    public int ScrollHeight
-    {
-        get => btnScrollLeft.IdleTexture.Height;
-    }
-
-    private int thumbWidth;
-
-    private int scrollablePixels;
-
-    private int buttonMinX = 0;
-
-    private int buttonMaxX = 0;
-
-    private int buttonX = 0;
+    public int ScrollHeight => btnScrollLeft.IdleTexture.Height;
 
     private XNAButton btnScrollLeft;
 
@@ -126,15 +100,15 @@ public class XNAHorizontalScrollBar : XNAControl
         AddChild(btnScrollLeft);
         AddChild(btnScrollRight);
 
-        btnScrollLeft.LeftClick += BtnScrollLeft_LeftClick;
-        btnScrollRight.LeftClick += BtnScrollRight_LeftClick;
+        btnScrollLeft.LeftClick += (s, e) => ScrollUp();
+        btnScrollRight.LeftClick += (s, e) => ScrollDown();
 
         background = AssetLoader.LoadTexture("hsbBackground.png");
         thumbMiddle = AssetLoader.LoadTexture("hsbMiddle.png");
         thumbLeft = AssetLoader.LoadTexture("hsbThumbLeft.png");
         thumbRight = AssetLoader.LoadTexture("hsbThumbRight.png");
     }
-    
+
     public override void Kill()
     {
         // These textures are cached, don't allow the buttons to dispose them
@@ -146,84 +120,39 @@ public class XNAHorizontalScrollBar : XNAControl
         base.Kill();
     }
 
-    /// <summary>
-    /// Scrolls up when the user presses on the "scroll left" arrow.
-    /// </summary>
-    private void BtnScrollLeft_LeftClick(object sender, EventArgs e)
+    /// <inheritdoc/>
+    protected override void OnRefreshNoScroll()
     {
-        if (ViewLeft > 0)
-        {
-            ViewLeft -= ScrollStep;
-            if (ViewLeft < 0)
-                ViewLeft = 0;
-        }
-
-        RefreshButtonX();
-
-        Scrolled?.Invoke(this, EventArgs.Empty);
+        btnScrollRight.Disable();
+        btnScrollLeft.Disable();
     }
 
-    /// <summary>
-    /// Scrolls down when the user presses on the "scroll down" arrow.
-    /// </summary>
-    private void BtnScrollRight_LeftClick(object sender, EventArgs e)
+    /// <inheritdoc/>
+    protected override void OnRefreshWithScroll()
     {
-        int nonDisplayedLines = Length - DisplayedPixelCount;
-
-        if (ViewLeft < nonDisplayedLines)
-            ViewLeft = Math.Min(ViewLeft + ScrollStep, nonDisplayedLines);
-
-        RefreshButtonX();
-
-        Scrolled?.Invoke(this, EventArgs.Empty);
+        btnScrollRight.Enable();
+        btnScrollLeft.Enable();
     }
 
-    /// <summary>
-    /// Returns a bool that tells whether there's enough items in a list for 
-    /// the scrollbar to be drawn.
-    /// </summary>
-    public bool IsDrawn()
-    {
-        return scrollablePixels > 0;
-    }
+    /// <inheritdoc/>
+    protected override int AxisLength => Width;
+
+    /// <inheritdoc/>
+    protected override int AxisCoordinate(Point cursorPoint) => cursorPoint.X;
 
     /// <summary>
-    /// Refreshes the scroll bar's thumb size.
+    /// Updates the horizontal position of the scroll bar's thumb
+    /// from a new <paramref name="viewLeft"/> value.
     /// </summary>
-    public void Refresh()
-    {
-        int width = Width -
-            btnScrollLeft.Width - btnScrollRight.Width;
-
-        int nonDisplayedColumns = Length - DisplayedPixelCount;
-
-        if (nonDisplayedColumns <= 0)
-        {
-            thumbWidth = width;
-            scrollablePixels = 0;
-            btnScrollRight.Disable();
-            btnScrollLeft.Disable();
-        }
-        else
-        {
-            thumbWidth = Math.Max(width - (int)(width * nonDisplayedColumns / (double)Length),
-                MIN_BUTTON_WIDTH);
-
-            scrollablePixels = width - thumbWidth;
-
-            btnScrollRight.Enable();
-            btnScrollLeft.Enable();
-        }
-
-        buttonMinX = btnScrollLeft.Right + thumbWidth / 2;
-        buttonMaxX = Width - btnScrollRight.Width - (thumbWidth / 2);
-
-        RefreshButtonX();
-    }
+    public void RefreshButtonX(int viewLeft) => RefreshButtonY(viewLeft);
 
     /// <summary>
-    /// Scrolls the scrollbar when it's clicked on.
+    /// Updates the horizontal position of the scroll bar's thumb
+    /// from the current <see cref="ViewLeft"/>.
     /// </summary>
+    public void RefreshButtonX() => RefreshButtonY();
+
+    /// <inheritdoc/>
     public override void OnLeftClick(InputEventArgs inputEventArgs)
     {
         if (IsDrawn())
@@ -231,91 +160,24 @@ public class XNAHorizontalScrollBar : XNAControl
             inputEventArgs.Handled = true;
             base.OnLeftClick(inputEventArgs);
 
-            Scroll();
+            HandleTrackClick(GetCursorPoint());
         }
     }
 
-    /// <summary>
-    /// Scrolls the scrollbar if the user presses the mouse left button
-    /// while moving the cursor over the scrollbar.
-    /// </summary>
+    /// <inheritdoc/>
     public override void OnMouseMove()
     {
         base.OnMouseMove();
 
-        if (Cursor.LeftDown)
+        // Only start dragging if the left button was pressed on this scroll bar;
+        // otherwise a drag that started on another control (e.g. an open drop-down)
+        // would scroll as soon as the cursor crosses the scroll bar.
+        if (Cursor.LeftDown && IsLeftPressedOn)
         {
-            Scroll();
+            HandleTrackClick(GetCursorPoint());
             isHeldDown = true;
             WindowManager.SelectedControl = this;
         }
-    }
-
-    private void Scroll()
-    {
-        var point = GetCursorPoint();
-
-        if (point.X < btnScrollLeft.Right
-            || point.X > btnScrollRight.X)
-        {
-            return;
-        }
-        
-        if (point.X <= buttonMinX || DisplayedPixelCount >= Length)
-        {
-            ViewLeft = 0;
-            RefreshButtonX();
-            Scrolled?.Invoke(this, EventArgs.Empty);
-            return;
-        }
-
-        if (point.X >= buttonMaxX)
-        {
-            ViewLeft = Length - DisplayedPixelCount;
-            RefreshButtonX();
-            Scrolled?.Invoke(this, EventArgs.Empty);
-            ScrolledToRight?.Invoke(this, EventArgs.Empty);
-            return;
-        }
-
-        double difference = buttonMaxX - buttonMinX;
-
-        double location = point.X - buttonMinX;
-
-        int nonDisplayedLines = Length - DisplayedPixelCount;
-
-        ViewLeft = (int)(location / difference * nonDisplayedLines);
-        RefreshButtonX();
-
-        Scrolled?.Invoke(this, EventArgs.Empty);
-    }
-
-    /// <summary>
-    /// Updates the top item index of the scroll bar,
-    /// and the horizontal position of the scroll bar's thumb.
-    /// </summary>
-    public void RefreshButtonX(int viewLeft)
-    {
-        ViewLeft = viewLeft;
-        RefreshButtonX();
-    }
-
-    /// <summary>
-    /// Updates the horizontal position of the scroll bar's thumb.
-    /// </summary>
-    public void RefreshButtonX()
-    {
-        int nonDisplayedColumns = Length - DisplayedPixelCount;
-
-        if (nonDisplayedColumns <= 0)
-        {
-            buttonX = btnScrollLeft.RenderRectangle().Right;
-            return;
-        }
-
-        buttonX = Math.Min(
-            buttonMinX + (int)(((ViewLeft / (double)nonDisplayedColumns) * scrollablePixels) - thumbWidth / 2),
-            Width - btnScrollRight.Width - thumbWidth);
     }
 
     /// <summary>
@@ -337,13 +199,14 @@ public class XNAHorizontalScrollBar : XNAControl
             }
             else
             {
-                Scroll();
+                HandleTrackClick(GetCursorPoint());
             }
         }
     }
 
     /// <summary>
-    /// Draws the scroll bar.
+    /// Draws the scroll bar: background track, then the three-part thumb
+    /// (left cap, stretched middle, right cap).
     /// </summary>
     /// <param name="gameTime">Provides a snapshot of timing values.</param>
     public override void Draw(GameTime gameTime)
@@ -352,11 +215,16 @@ public class XNAHorizontalScrollBar : XNAControl
         {
             DrawTexture(background, new Rectangle(0, 0, Width, Height), Color.White);
 
-            DrawTexture(thumbLeft, new Rectangle(buttonX, 0, thumbLeft.Width, ScrollHeight), RemapColor);
-            DrawTexture(thumbRight, new Rectangle(buttonX + thumbWidth - thumbRight.Width,
+            // The base class tracks the thumb position and size along the scroll
+            // axis in buttonY/thumbHeight regardless of orientation.
+            int thumbX = buttonY;
+            int thumbSize = thumbHeight;
+
+            DrawTexture(thumbLeft, new Rectangle(thumbX, 0, thumbLeft.Width, ScrollHeight), RemapColor);
+            DrawTexture(thumbRight, new Rectangle(thumbX + thumbSize - thumbRight.Width,
                 0, thumbRight.Width, ScrollHeight), Color.White);
-            DrawTexture(thumbMiddle, new Rectangle(buttonX + thumbLeft.Width,
-                0, thumbWidth - thumbLeft.Width - thumbRight.Width, ScrollHeight), Color.White);
+            DrawTexture(thumbMiddle, new Rectangle(thumbX + thumbLeft.Width,
+                0, thumbSize - thumbLeft.Width - thumbRight.Width, ScrollHeight), Color.White);
         }
 
         base.Draw(gameTime);

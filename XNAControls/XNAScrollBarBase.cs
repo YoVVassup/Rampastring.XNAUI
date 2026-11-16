@@ -24,7 +24,10 @@ public abstract class XNAScrollBarBase : XNAControl
     /// </summary>
     private const float ScrollRoundingFactor = 0.99f;
 
-    private const int MIN_BUTTON_HEIGHT = 10;
+    /// <summary>
+    /// Minimum thumb size in pixels along the scroll axis.
+    /// </summary>
+    private const int MIN_THUMB_SIZE = 10;
 
     /// <summary>
     /// Fired when the scroll position changes via track click, button click or step scroll.
@@ -37,7 +40,8 @@ public abstract class XNAScrollBarBase : XNAControl
     public event EventHandler ScrolledToBottom;
 
     /// <summary>
-    /// Total scrollable content height in pixels (e.g. sum of all item heights in a list).
+    /// Total scrollable content length in pixels along the scroll axis
+    /// (e.g. sum of all item heights in a vertical list).
     /// </summary>
     public int Length { get; set; }
 
@@ -47,7 +51,8 @@ public abstract class XNAScrollBarBase : XNAControl
     public int DisplayedPixelCount { get; set; }
 
     /// <summary>
-    /// Current scroll offset in pixels from the top of the content.
+    /// Current scroll offset in pixels from the leading edge of the content
+    /// (the top; aliased as <c>ViewLeft</c> on horizontal scroll bars).
     /// </summary>
     public int ViewTop { get; set; }
 
@@ -78,14 +83,16 @@ public abstract class XNAScrollBarBase : XNAControl
     protected int buttonY;
 
     /// <summary>
-    /// Fixed height reserved at the top for an up-button or other header element.
-    /// Set to 0 for scroll bars without buttons.
+    /// Fixed size reserved at the leading edge of the scroll axis for an
+    /// up-button or other header element (the top for vertical bars, the left
+    /// for horizontal ones). Set to 0 for scroll bars without buttons.
     /// </summary>
     protected int HeaderHeight { get; set; }
 
     /// <summary>
-    /// Fixed height reserved at the bottom for a down-button or other footer element.
-    /// Set to 0 for scroll bars without buttons.
+    /// Fixed size reserved at the trailing edge of the scroll axis for a
+    /// down-button or other footer element (the bottom for vertical bars, the
+    /// right for horizontal ones). Set to 0 for scroll bars without buttons.
     /// </summary>
     protected int FooterHeight { get; set; }
 
@@ -95,31 +102,44 @@ public abstract class XNAScrollBarBase : XNAControl
     public bool IsDrawn() => scrollablePixels > 0;
 
     /// <summary>
+    /// Length of the scroll bar along its scroll axis:
+    /// <see cref="XNAControl.Height"/> for vertical bars (the default),
+    /// <see cref="XNAControl.Width"/> for horizontal ones.
+    /// </summary>
+    protected virtual int AxisLength => Height;
+
+    /// <summary>
+    /// Returns the cursor coordinate along the scroll axis:
+    /// Y for vertical bars (the default), X for horizontal ones.
+    /// </summary>
+    protected virtual int AxisCoordinate(Point cursorPoint) => cursorPoint.Y;
+
+    /// <summary>
     /// Recalculates thumb size and track bounds from <see cref="Length"/>,
     /// <see cref="DisplayedPixelCount"/>, <see cref="HeaderHeight"/> and <see cref="FooterHeight"/>.
     /// Call after any of those values change.
     /// </summary>
     public void Refresh()
     {
-        int height = Height - HeaderHeight - FooterHeight;
+        int trackLength = AxisLength - HeaderHeight - FooterHeight;
         int nonDisplayedLines = Length - DisplayedPixelCount;
 
         if (nonDisplayedLines <= 0)
         {
-            thumbHeight = height;
+            thumbHeight = trackLength;
             scrollablePixels = 0;
             OnRefreshNoScroll();
         }
         else
         {
-            thumbHeight = Math.Max(height - (int)(height * nonDisplayedLines / (double)Length),
-                MIN_BUTTON_HEIGHT);
-            scrollablePixels = height - thumbHeight;
+            thumbHeight = Math.Max(trackLength - (int)(trackLength * nonDisplayedLines / (double)Length),
+                MIN_THUMB_SIZE);
+            scrollablePixels = trackLength - thumbHeight;
             OnRefreshWithScroll();
         }
 
         buttonMinY = HeaderHeight + thumbHeight / 2;
-        buttonMaxY = Height - FooterHeight - (thumbHeight / 2);
+        buttonMaxY = AxisLength - FooterHeight - (thumbHeight / 2);
 
         RefreshButtonY();
     }
@@ -160,7 +180,7 @@ public abstract class XNAScrollBarBase : XNAControl
         }
 
         buttonY = buttonMinY + (int)(((ViewTop / (double)nonDisplayedLines) * scrollablePixels) - thumbHeight / 2);
-        buttonY = Math.Max(HeaderHeight, Math.Min(buttonY, Height - FooterHeight - thumbHeight));
+        buttonY = Math.Max(HeaderHeight, Math.Min(buttonY, AxisLength - FooterHeight - thumbHeight));
     }
 
     /// <summary>
@@ -173,13 +193,15 @@ public abstract class XNAScrollBarBase : XNAControl
         if (!IsDrawn())
             return;
 
-        if (cursorPoint.Y < HeaderHeight + thumbHeight / 2
-            || cursorPoint.Y > Height - FooterHeight - thumbHeight / 2)
+        int coordinate = AxisCoordinate(cursorPoint);
+
+        if (coordinate < HeaderHeight
+            || coordinate > AxisLength - FooterHeight)
         {
             return;
         }
 
-        if (cursorPoint.Y <= buttonMinY || DisplayedPixelCount >= Length)
+        if (coordinate <= buttonMinY || DisplayedPixelCount >= Length)
         {
             ViewTop = 0;
             RefreshButtonY();
@@ -187,7 +209,7 @@ public abstract class XNAScrollBarBase : XNAControl
             return;
         }
 
-        if (cursorPoint.Y >= buttonMaxY)
+        if (coordinate >= buttonMaxY)
         {
             ViewTop = Length - DisplayedPixelCount;
             RefreshButtonY();
@@ -197,7 +219,7 @@ public abstract class XNAScrollBarBase : XNAControl
         }
 
         double difference = buttonMaxY - buttonMinY;
-        double location = cursorPoint.Y - buttonMinY;
+        double location = coordinate - buttonMinY;
         int nonDisplayedLines = Length - DisplayedPixelCount;
 
         ViewTop = (int)(location / difference * (nonDisplayedLines + ScrollRoundingFactor));
